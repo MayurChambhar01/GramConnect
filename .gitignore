@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.vite/
+*.log
+.env
+.env.*
+!.env.example
+
+gramseva/client/node_modules/
+gramseva/client/dist/
+gramseva/client/.vite/
+gramseva/server/node_modules/
+gramseva/node_modules/

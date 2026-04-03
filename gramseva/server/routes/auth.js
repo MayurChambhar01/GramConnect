@@ -5,6 +5,7 @@ const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const { protect } = require('../middleware/auth');
 const upload = require('../middleware/upload');
+const { uploadBufferToBlob } = require('../utils/blob');
 const { sendOTP, verifyOTP } = require('../utils/otp');
 
 const signToken = (id) => jwt.sign({ id }, process.env.JWT_SECRET || 'gramseva_secret_2024', { expiresIn: '7d' });
@@ -38,6 +39,7 @@ router.post('/register', (req, res, next) => { req.uploadFolder = 'documents'; n
     if (!req.file) return res.status(400).json({ success: false, message: 'Identity proof document is mandatory. Please upload Aadhaar/Ration Card/Voter ID.' });
     const existing = await User.findOne({ $or: [{ mobile }, { aadhaarNumber }] });
     if (existing) return res.status(400).json({ success: false, message: 'Mobile or Aadhaar already registered' });
+    const uploadedDocument = await uploadBufferToBlob('documents', req.file);
 
     let members = [];
     try { members = familyMembers ? JSON.parse(familyMembers) : []; } catch {}
@@ -45,7 +47,7 @@ router.post('/register', (req, res, next) => { req.uploadFolder = 'documents'; n
     const user = await User.create({
       name, aadhaarNumber, age: Number(age), gender, mobile, address, village, pincode,
       password, documentType: documentType || 'aadhaar',
-      documentPath: req.file.path, documentOriginalName: req.file.originalname,
+      documentPath: uploadedDocument.url, documentOriginalName: uploadedDocument.originalName,
       familyPin, securityQuestion, securityAnswer: securityAnswer || '',
       familyMembers: members,
       allowMembersViewRecords: allowMembersViewRecords !== 'false',

@@ -20,9 +20,9 @@ router.post('/send-otp', async (req, res) => {
 });
 
 // Verify OTP
-router.post('/verify-otp', (req, res) => {
+router.post('/verify-otp', async (req, res) => {
   const { mobile, otp } = req.body;
-  const result = verifyOTP(mobile, otp);
+  const result = await verifyOTP(mobile, otp);
   if (!result.valid) return res.status(400).json({ success: false, message: result.message });
   res.json({ success: true, message: 'OTP verified' });
 });
@@ -139,7 +139,7 @@ router.post('/forgot-password', async (req, res) => {
 router.post('/reset-password', async (req, res) => {
   try {
     const { mobile, otp, newPassword } = req.body;
-    const check = verifyOTP(mobile, otp);
+    const check = await verifyOTP(mobile, otp);
     if (!check.valid) return res.status(400).json({ success: false, message: check.message });
     const user = await User.findOne({ mobile });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });

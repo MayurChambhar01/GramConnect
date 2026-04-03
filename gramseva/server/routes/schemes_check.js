@@ -1,0 +1,121 @@
+const express = require('express');
+const router = express.Router();
+const { protect } = require('../middleware/auth');
+const { Scheme } = require('../models/Scheme');
+
+// All 30 real Indian government schemes with eligibility rules
+const SCHEMES = [
+  { id:'pmkisan',    name:'PM Kisan Samman Nidhi', benefit:'₹6,000/year direct to bank', category:'agriculture',
+    emoji:'🌾', dept:'Agriculture Ministry', criteria:['Farmer family','Land holding any size','Small/marginal preferred'],
+    check: u => u.occupation==='farmer' || u.landAcres > 0 },
+  { id:'pmay',       name:'PM Awas Yojana (Gramin)', benefit:'Up to ₹1.2 lakh for house', category:'housing',
+    emoji:'🏠', dept:'Rural Development', criteria:['No pucca house','Annual income < ₹3 lakh','BPL card preferred'],
+    check: u => !u.hasPuccaHouse && u.annualIncome < 300000 },
+  { id:'ujjwala',    name:'PM Ujjwala Yojana', benefit:'Free LPG connection', category:'welfare',
+    emoji:'🔥', dept:'Petroleum Ministry', criteria:['Woman head of household','BPL family','No existing LPG connection'],
+    check: u => u.gender==='Female' && u.bpl && !u.hasLpg },
+  { id:'pmjdy',      name:'Jan Dhan Yojana', benefit:'Zero-balance bank account + RuPay card + ₹2L insurance', category:'welfare',
+    emoji:'🏦', dept:'Finance Ministry', criteria:['No existing bank account','Any Indian citizen'],
+    check: u => !u.hasBankAccount },
+  { id:'pmsby',      name:'Suraksha Bima Yojana', benefit:'₹2 lakh accident insurance at ₹20/year', category:'welfare',
+    emoji:'🛡️', dept:'Finance Ministry', criteria:['Age 18–70','Bank account required'],
+    check: u => u.age >= 18 && u.age <= 70 },
+  { id:'pmjjby',     name:'Jeevan Jyoti Bima Yojana', benefit:'₹2 lakh life insurance at ₹436/year', category:'welfare',
+    emoji:'💚', dept:'Finance Ministry', criteria:['Age 18–50','Bank account required'],
+    check: u => u.age >= 18 && u.age <= 50 },
+  { id:'atal',       name:'Atal Pension Yojana', benefit:'Guaranteed pension ₹1,000–5,000/month after 60', category:'welfare',
+    emoji:'👴', dept:'Finance Ministry', criteria:['Age 18–40','Unorganised sector worker'],
+    check: u => u.age >= 18 && u.age <= 40 },
+  { id:'nfsa',       name:'National Food Security Act (Ration)', benefit:'5kg grain/month at ₹1-3/kg', category:'welfare',
+    emoji:'🍚', dept:'Food Ministry', criteria:['BPL family','Ration card','Income below poverty line'],
+    check: u => u.bpl },
+  { id:'swachh',     name:'Swachh Bharat Gramin (Toilet)', benefit:'₹12,000 for toilet construction', category:'infrastructure',
+    emoji:'🚽', dept:'Jal Shakti Ministry', criteria:['No toilet at home','Rural household'],
+    check: u => !u.hasToilet },
+  { id:'pmfby',      name:'Pradhan Mantri Fasal Bima', benefit:'Crop insurance at low premium', category:'agriculture',
+    emoji:'🌱', dept:'Agriculture Ministry', criteria:['Farmer with crop loan','Any farmer can apply'],
+    check: u => u.occupation==='farmer' },
+  { id:'mgnregs',    name:'MGNREGS (100 days work)', benefit:'100 days paid employment/year', category:'employment',
+    emoji:'⛏️', dept:'Rural Development', criteria:['Rural household','Adult member willing to do manual work'],
+    check: u => u.age >= 18 && u.age < 60 },
+  { id:'pmvvy',      name:'Vaya Vandana Yojana', benefit:'8% pension return for senior citizens', category:'welfare',
+    emoji:'🌼', dept:'LIC / Finance', criteria:['Age 60+','Investment of ₹1.5–15 lakh'],
+    check: u => u.age >= 60 },
+  { id:'scholarship',name:'Post-Matric SC/ST Scholarship', benefit:'Full tuition + stipend', category:'education',
+    emoji:'🎓', dept:'Social Justice Ministry', criteria:['SC/ST student','Post-matric education','Annual income < ₹2.5 lakh'],
+    check: u => (u.caste==='SC'||u.caste==='ST') && u.annualIncome < 250000 },
+  { id:'nsp',        name:'OBC Pre-Matric Scholarship', benefit:'₹700–1000/month stipend', category:'education',
+    emoji:'📚', dept:'Social Justice Ministry', criteria:['OBC student','Pre-matric class 1-10','Annual income < ₹1 lakh'],
+    check: u => u.caste==='OBC' && u.age < 18 && u.annualIncome < 100000 },
+  { id:'kalia',      name:'KALIA Scheme (Odisha)', benefit:'₹25,000 financial assistance to farmers', category:'agriculture',
+    emoji:'🚜', dept:'Odisha Agriculture', criteria:['Small/marginal farmer','Land < 5 acres'],
+    check: u => u.occupation==='farmer' && u.landAcres < 5 },
+  { id:'ayushman',   name:'Ayushman Bharat PM-JAY', benefit:'₹5 lakh health insurance/year', category:'health',
+    emoji:'🏥', dept:'Health Ministry', criteria:['Low-income family','SECC 2011 listed','BPL preferred'],
+    check: u => u.annualIncome < 500000 },
+  { id:'janani',     name:'Janani Suraksha Yojana', benefit:'₹1,400 cash for institutional delivery', category:'health',
+    emoji:'👶', dept:'Health Ministry', criteria:['Pregnant women','BPL or SC/ST','Institutional delivery'],
+    check: u => u.gender==='Female' && u.age >= 18 && u.age <= 45 },
+  { id:'pmmatru',    name:'PM Matru Vandana Yojana', benefit:'₹5,000 for first child', category:'health',
+    emoji:'🤱', dept:'Women & Child', criteria:['First pregnancy','Age 19+','Registered with ASHA'],
+    check: u => u.gender==='Female' && u.age >= 19 },
+  { id:'sukanya',    name:'Sukanya Samriddhi Yojana', benefit:'High-interest savings for girl child education/marriage', category:'education',
+    emoji:'👧', dept:'Finance Ministry', criteria:['Girl child below 10 years','Parents open account'],
+    check: u => u.gender==='Female' && u.age < 10 },
+  { id:'pm_mudra',   name:'PM MUDRA Yojana', benefit:'Loan up to ₹10 lakh for small business', category:'employment',
+    emoji:'💼', dept:'MUDRA Bank', criteria:['Non-farm micro enterprise','Age 18+','Small business owner'],
+    check: u => u.age >= 18 && u.occupation==='business' },
+  { id:'standup',    name:'Stand Up India', benefit:'₹10 lakh–1 crore loan for SC/ST/Women entrepreneurs', category:'employment',
+    emoji:'🚀', dept:'Finance Ministry', criteria:['SC/ST or Woman entrepreneur','Greenfield project','Age 18+'],
+    check: u => (u.caste==='SC'||u.caste==='ST'||u.gender==='Female') && u.age>=18 },
+  { id:'nrega_mat',  name:'NREGA Maternity Benefit', benefit:'₹1,500 maternity payment', category:'welfare',
+    emoji:'🌸', dept:'Rural Development', criteria:['MGNREGS registered woman','Pregnancy'],
+    check: u => u.gender==='Female' && u.age>=18 },
+  { id:'deen_dayal', name:'Deen Dayal Upadhyaya Grameen Kaushalya', benefit:'Free skill training + placement', category:'employment',
+    emoji:'🔧', dept:'Rural Development', criteria:['Rural youth age 15–35','School dropout or passed'],
+    check: u => u.age >= 15 && u.age <= 35 },
+  { id:'pmgdisha',   name:'PM Gramin Digital Saksharta', benefit:'Free digital literacy training', category:'education',
+    emoji:'💻', dept:'Electronics Ministry', criteria:['Rural household','At least one non-literate member'],
+    check: u => true }, // universal
+  { id:'nhm',        name:'National Health Mission (Free Medicines)', benefit:'Free essential medicines at govt hospitals', category:'health',
+    emoji:'💊', dept:'Health Ministry', criteria:['Any citizen','Government hospital visit'],
+    check: u => true }, // universal
+  { id:'ddugky',     name:'Deen Dayal Antyodaya (Urban)', benefit:'Skill training + SHG support for urban poor', category:'employment',
+    emoji:'🏙️', dept:'Housing & Urban', criteria:['Urban poor family','Women SHG members'],
+    check: u => u.annualIncome < 200000 },
+  { id:'pm_svamitva',name:'SVAMITVA Scheme', benefit:'Property card / house ownership rights', category:'housing',
+    emoji:'📜', dept:'Panchayati Raj', criteria:['Rural household','No formal property document'],
+    check: u => !u.hasPropertyCard },
+  { id:'soil_health',name:'Soil Health Card Scheme', benefit:'Free soil testing + recommendations', category:'agriculture',
+    emoji:'🌍', dept:'Agriculture Ministry', criteria:['Any farmer'],
+    check: u => u.occupation==='farmer' },
+  { id:'pmksy',      name:'PM Krishi Sinchai Yojana', benefit:'Subsidised irrigation equipment', category:'agriculture',
+    emoji:'💧', dept:'Agriculture Ministry', criteria:['Farmer with own land','Any size holding'],
+    check: u => u.occupation==='farmer' && u.landAcres > 0 },
+  { id:'e_shram',    name:'e-SHRAM Card', benefit:'Universal accident insurance + scheme linkage', category:'welfare',
+    emoji:'🪪', dept:'Labour Ministry', criteria:['Unorganised worker','Age 16–59','Not EPFO/ESIC member'],
+    check: u => u.age >= 16 && u.age <= 59 },
+];
+
+router.post('/', protect, async (req, res) => {
+  const { age, gender, caste, annualIncome, occupation, landAcres,
+          bpl, hasBankAccount, hasPuccaHouse, hasLpg, hasToilet, hasPropertyCard } = req.body;
+
+  const profile = { age: +age||0, gender, caste, annualIncome: +annualIncome||0,
+    occupation, landAcres: +landAcres||0,
+    bpl: bpl==='true'||bpl===true,
+    hasBankAccount: hasBankAccount==='true'||hasBankAccount===true,
+    hasPuccaHouse:  hasPuccaHouse==='true'||hasPuccaHouse===true,
+    hasLpg:         hasLpg==='true'||hasLpg===true,
+    hasToilet:      hasToilet==='true'||hasToilet===true,
+    hasPropertyCard:hasPropertyCard==='true'||hasPropertyCard===true,
+  };
+
+  const matched = SCHEMES.filter(s => { try { return s.check(profile); } catch { return false; } });
+  const cats = [...new Set(matched.map(s => s.category))];
+
+  res.json({ success: true, total: matched.length, categories: cats,
+    schemes: matched.map(s => ({ id:s.id, name:s.name, benefit:s.benefit, category:s.category, emoji:s.emoji, dept:s.dept, criteria:s.criteria })) });
+});
+
+module.exports = router;

@@ -410,7 +410,7 @@ def health():
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("AI_PORT", 6000))
+    port = int(os.environ.get("PORT", os.environ.get("AI_PORT", 6000)))
     print("=" * 50)
     print(f"  GramSeva AI Service  |  Port {port}")
     print("=" * 50)
